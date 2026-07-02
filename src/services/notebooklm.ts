@@ -99,6 +99,10 @@ export class NotebookLmService {
     await this.run(['download', 'audio', notebookId, '--id', artifactId, '--output', outputPath]);
   }
 
+  public async deleteNotebook(notebookId: string): Promise<void> {
+    await this.run(['notebook', 'delete', notebookId, '--confirm']);
+  }
+
   public buildPodcastTitle(resourceName: string, artifact: { title: string }): string {
     return buildPodcastTitle(resourceName, removeFileExtension(artifact.title));
   }

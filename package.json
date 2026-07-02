@@ -10,6 +10,7 @@
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "preview-reset-targets": "tsx src/preview-reset-targets.ts",
     "reset-local-data": "tsx src/reset-local-data.ts"
   },
   "dependencies": {

@@ -20,6 +20,27 @@ export class EpisodeRepository {
     this.db.close();
   }
 
+  public listAll(siteUrl?: string): EpisodeRecord[] {
+    if (siteUrl) {
+      const stmt = this.db.prepare(`
+        SELECT *
+        FROM episode
+        WHERE wordpress_site_url = ?
+        ORDER BY id ASC
+      `);
+
+      return stmt.all(siteUrl) as EpisodeRecord[];
+    }
+
+    const stmt = this.db.prepare(`
+      SELECT *
+      FROM episode
+      ORDER BY id ASC
+    `);
+
+    return stmt.all() as EpisodeRecord[];
+  }
+
   public listBacklog(siteUrl: string, types: EpisodeType[], limit: number): EpisodeRecord[] {
     const placeholders = types.map(() => '?').join(', ');
     const stmt = this.db.prepare(`
@@ -33,6 +54,21 @@ export class EpisodeRepository {
     `);
 
     return stmt.all(siteUrl, ...types, limit) as EpisodeRecord[];
+  }
+
+  public listPublished(siteUrl: string, types: EpisodeType[]): EpisodeRecord[] {
+    const placeholders = types.map(() => '?').join(', ');
+    const stmt = this.db.prepare(`
+      SELECT *
+      FROM episode
+      WHERE wordpress_site_url = ?
+        AND status = 'published'
+        AND wordpress_post_id IS NOT NULL
+        AND type IN (${placeholders})
+      ORDER BY id ASC
+    `);
+
+    return stmt.all(siteUrl, ...types) as EpisodeRecord[];
   }
 
   public findByUniqueKey(siteUrl: string, type: EpisodeType, sourceItemId: string): EpisodeRecord | undefined {
@@ -146,6 +182,17 @@ export class EpisodeRepository {
       UPDATE episode
       SET wordpress_post_id = ?,
           status = 'published',
+          error_message = NULL,
+          updated_at = ?
+      WHERE id = ?
+    `).run(wordpressPostId, nowIso(), id);
+  }
+
+  public prepareForRepublish(id: number, wordpressPostId: number | null): void {
+    this.db.prepare(`
+      UPDATE episode
+      SET wordpress_post_id = ?,
+          status = 'generated',
           error_message = NULL,
           updated_at = ?
       WHERE id = ?

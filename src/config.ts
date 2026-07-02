@@ -10,6 +10,7 @@ const envSchema = z.object({
   WORDPRESS_USERNAME: z.string().min(1),
   WORDPRESS_APP_PASSWORD: z.string().min(1),
   WORDPRESS_SITE_URL: z.string().url(),
+  WORDPRESS_SITE_SLUG: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/),
   TMDB_API_TOKEN: z.string().min(1),
   BANGUMI_API_TOKEN: z.string().min(1),
   RESOURCE_START_DATE: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -64,15 +65,20 @@ export function loadConfig(cli: CliOptions): AppConfig {
   const dbDir = path.join(storageDir, 'db');
   const posterDir = path.join(storageDir, 'posters');
   const audioDir = path.join(storageDir, 'audio');
+  const logDir = path.join(storageDir, 'logs');
+  const runStamp = new Date().toISOString().replaceAll(':', '-');
+  const runLogPath = path.join(logDir, `run-${runStamp}.log`);
 
   fs.mkdirSync(dbDir, { recursive: true });
   fs.mkdirSync(posterDir, { recursive: true });
   fs.mkdirSync(audioDir, { recursive: true });
+  fs.mkdirSync(logDir, { recursive: true });
 
   return {
     wordpressUsername: env.WORDPRESS_USERNAME,
     wordpressAppPassword: env.WORDPRESS_APP_PASSWORD,
     wordpressSiteUrl: env.WORDPRESS_SITE_URL.replace(/\/+$/, ''),
+    wordpressSiteSlug: env.WORDPRESS_SITE_SLUG,
     tmdbApiToken: env.TMDB_API_TOKEN,
     bangumiApiToken: env.BANGUMI_API_TOKEN,
     resourceStartDate: env.RESOURCE_START_DATE,
@@ -80,6 +86,8 @@ export function loadConfig(cli: CliOptions): AppConfig {
     dbPath: path.join(dbDir, 'podcast.sqlite'),
     posterDir,
     audioDir,
+    logDir,
+    runLogPath,
     cli,
   };
 }

@@ -23,27 +23,79 @@ export function createProgressReporter(enabled: boolean): ProgressReporter {
     };
   }
 
+  const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let prefix = '';
   let active = false;
+  let lastPercent = 0;
+  let lastStatus = '';
+  let spinnerIndex = 0;
+  let timer: NodeJS.Timeout | null = null;
 
-  function render(percent: number, status: string, persist: boolean): void {
+  function draw(percent: number, status: string, persist: boolean): void {
     const width = Math.max(10, Math.min(24, Math.floor((process.stdout.columns ?? 100) * 0.2)));
     const clamped = Math.max(0, Math.min(100, Math.round(percent)));
     const filled = Math.round((clamped / 100) * width);
-    const bar = `${'='.repeat(filled)}${'-'.repeat(width - filled)}`;
+    const spinner = spinnerFrames[spinnerIndex % spinnerFrames.length];
+    let bar = `${'='.repeat(filled)}${'-'.repeat(width - filled)}`;
+
+    if (!persist) {
+      const remaining = Math.max(0, width - filled);
+      const animatedTail = remaining > 0
+        ? spinner.repeat(remaining)
+        : '';
+      bar = `${'='.repeat(filled)}${animatedTail}`;
+    }
+
     const line = `${prefix} [${bar}] ${String(clamped).padStart(3, ' ')}% ${truncate(status, 80)}`;
 
     process.stdout.write(`\r\x1b[2K${line}`);
-    active = !persist;
 
     if (persist) {
       process.stdout.write('\n');
     }
   }
 
+  function stopTimer(): void {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  }
+
+  function ensureTimer(): void {
+    if (timer || !active) {
+      return;
+    }
+
+    timer = setInterval(() => {
+      if (!active) {
+        stopTimer();
+        return;
+      }
+
+      spinnerIndex = (spinnerIndex + 1) % spinnerFrames.length;
+      draw(lastPercent, lastStatus, false);
+    }, 120);
+    timer.unref?.();
+  }
+
+  function render(percent: number, status: string, persist: boolean): void {
+    lastPercent = percent;
+    lastStatus = status;
+    active = !persist;
+    draw(percent, status, persist);
+
+    if (persist) {
+      stopTimer();
+    } else {
+      ensureTimer();
+    }
+  }
+
   return {
     note(message) {
       if (active) {
+        stopTimer();
         process.stdout.write('\n');
         active = false;
       }

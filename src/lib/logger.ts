@@ -1,28 +1,38 @@
+import fs from 'node:fs';
+
 import type { Logger } from '../types.js';
 
-function write(level: 'INFO' | 'ERROR', message: string, context?: Record<string, unknown>): void {
+function formatPayload(level: 'INFO' | 'ERROR', message: string, context?: Record<string, unknown>): string {
   const payload = {
     ts: new Date().toISOString(),
     level,
     message,
     ...(context ? { context } : {}),
   };
-  process.stdout.write(`${JSON.stringify(payload)}\n`);
+  return JSON.stringify(payload);
 }
 
-export function createLogger(verbose: boolean): Logger {
+export function createLogger(verbose: boolean, logFilePath?: string): Logger {
   return {
     info(message, context) {
+      const line = formatPayload('INFO', message, context);
+      if (logFilePath) {
+        fs.appendFileSync(logFilePath, `${line}\n`);
+      }
       if (!verbose) {
         return;
       }
-      write('INFO', message, context);
+      process.stdout.write(`${line}\n`);
     },
     error(message, context) {
+      const line = formatPayload('ERROR', message, context);
+      if (logFilePath) {
+        fs.appendFileSync(logFilePath, `${line}\n`);
+      }
       if (!verbose) {
         return;
       }
-      write('ERROR', message, context);
+      process.stdout.write(`${line}\n`);
     },
   };
 }

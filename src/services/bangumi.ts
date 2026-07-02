@@ -6,6 +6,7 @@ interface BangumiBrowseResponse {
   data?: Array<{
     id: number;
     name: string;
+    name_cn?: string;
     date?: string;
     images?: {
       large?: string;
@@ -111,7 +112,7 @@ export class BangumiService {
         results.push({
           sourceItemId: String(item.id),
           type: 'anime',
-          name: item.name,
+          name: item.name_cn?.trim() || item.name,
           sourceWebsiteUrl: `https://bangumi.tv/subject/${item.id}`,
           posterUrl,
           releaseDate,

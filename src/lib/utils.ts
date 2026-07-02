@@ -47,8 +47,11 @@ export function displayType(type: EpisodeType): string {
   }
 }
 
-export function buildNotebookTitle(record: Pick<EpisodeRecord, 'id' | 'type' | 'name'>): string {
-  return `${String(record.id).padStart(6, '0')}. ${displayType(record.type)}《${record.name}》`;
+export function buildNotebookTitle(
+  siteSlug: string,
+  record: Pick<EpisodeRecord, 'id' | 'type' | 'name'>,
+): string {
+  return `${siteSlug}-${String(record.id).padStart(6, '0')}. ${displayType(record.type)}《${record.name}》`;
 }
 
 export function buildResearchQuery(type: EpisodeType, name: string): string {
@@ -61,6 +64,32 @@ export function sanitizeFilename(input: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 160);
+}
+
+export function sanitizeHeaderFilename(input: string, fallback = 'file'): string {
+  const ext = path.extname(input);
+  const baseName = ext ? input.slice(0, -ext.length) : input;
+  const sanitizedBase = baseName
+    .normalize('NFKD')
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/[<>:"/\\|?*]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .trim()
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 120);
+
+  const safeExt = ext
+    .normalize('NFKD')
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/[^A-Za-z0-9.]/g, '')
+    .toLowerCase();
+
+  if (sanitizedBase) {
+    return `${sanitizedBase}${safeExt}`;
+  }
+
+  return `${fallback}${safeExt || ''}`;
 }
 
 export function removeFileExtension(filename: string): string {
@@ -76,11 +105,48 @@ export function buildPodcastTitle(name: string, artifactTitle: string): string {
   return `《${name}》${removeFileExtension(artifactTitle).trim()}`;
 }
 
+export function extractNotebookAnswer(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const unfenced = trimmed
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
+
+  try {
+    const parsed = JSON.parse(unfenced) as unknown;
+    if (parsed && typeof parsed === 'object' && 'answer' in parsed && typeof (parsed as { answer: unknown }).answer === 'string') {
+      return ((parsed as { answer: string }).answer).trim();
+    }
+  } catch {
+    // Keep raw text when the response is not JSON.
+  }
+
+  return unfenced;
+}
+
+export function normalizeNotebookText(raw: string): string {
+  return extractNotebookAnswer(raw)
+    .replace(/\r\n/g, '\n')
+    .trim();
+}
+
 export function parsePodcastTags(raw: string): string[] {
+  const normalized = extractNotebookAnswer(raw)
+    .replaceAll('，', ',')
+    .replaceAll('、', ',')
+    .replace(/[；;]+/g, ',')
+    .replace(/[。！？!?]+/g, ',')
+    .replace(/\[[^\]]+\]/g, '')
+    .replace(/[{}"]/g, '')
+    .replace(/\s*\n+\s*/g, ',');
+
   return Array.from(
     new Set(
-      raw
-        .replaceAll('，', ',')
+      normalized
         .split(',')
         .map((value) => value.trim())
         .filter(Boolean),

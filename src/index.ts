@@ -8,9 +8,16 @@ import { PodcastPipeline } from './pipeline.js';
 async function main(): Promise<void> {
   const cli = parseCliArgs(process.argv);
   const config = loadConfig(cli);
-  const logger = createLogger(cli.verbose);
+  const logger = createLogger(cli.verbose, config.runLogPath);
   const progress = createProgressReporter(!cli.verbose);
   const pipeline = new PodcastPipeline(config, logger, progress);
+  logger.info('Run started', {
+    argv: process.argv.slice(2),
+    runLogPath: config.runLogPath,
+  });
+  if (!cli.verbose) {
+    progress.note(`日志文件: ${config.runLogPath}`);
+  }
 
   await pipeline.run();
 }

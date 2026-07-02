@@ -2,7 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { EpisodeRepository } from './db.js';
-import { buildNotebookTitle, buildResearchQuery, inferExtensionFromUrl, parsePodcastTags, sanitizeFilename } from './lib/utils.js';
+import {
+  buildNotebookTitle,
+  buildResearchQuery,
+  inferExtensionFromUrl,
+  normalizeNotebookText,
+  parsePodcastTags,
+  sanitizeFilename,
+} from './lib/utils.js';
 import { downloadToFile } from './services/files.js';
 import { BangumiService } from './services/bangumi.js';
 import { NotebookLmService } from './services/notebooklm.js';
@@ -38,6 +45,7 @@ export class PodcastPipeline {
     let failed = false;
     try {
       await this.preflight();
+      await this.reconcilePublishedRecords();
       const backlog = this.repository.listBacklog(
         this.config.wordpressSiteUrl,
         this.config.cli.types,
@@ -82,6 +90,52 @@ export class PodcastPipeline {
     fs.accessSync(this.config.storageDir, fs.constants.W_OK);
     await this.notebookLm.checkLogin();
     await this.wordpress.preflight();
+  }
+
+  private async reconcilePublishedRecords(): Promise<void> {
+    const publishedRecords = this.repository.listPublished(
+      this.config.wordpressSiteUrl,
+      this.config.cli.types,
+    );
+
+    for (const record of publishedRecords) {
+      const normalizedDescription = normalizeNotebookText(record.podcast_description ?? '');
+      const normalizedTags = parsePodcastTags(record.podcast_tags ?? '');
+      const storedDescription = record.podcast_description?.trim() ?? '';
+      const storedTags = record.podcast_tags?.trim() ?? '';
+      const normalizedTagString = normalizedTags.join(', ');
+      const needsContentRepair = normalizedDescription !== storedDescription
+        || normalizedTagString !== storedTags;
+
+      const hasPublishPayload = Boolean(
+        record.podcast_audio_file_path
+        && record.podcast_title
+        && normalizedDescription
+        && normalizedTags.length > 0,
+      );
+
+      let postExists = false;
+      if (record.wordpress_post_id) {
+        postExists = await this.wordpress.episodePostExists(record.wordpress_post_id);
+      }
+
+      if (!postExists && hasPublishPayload) {
+        this.logger.info('Queueing published record for republish because WordPress post is missing', {
+          episodeId: record.id,
+          wordpressPostId: record.wordpress_post_id,
+        });
+        this.repository.prepareForRepublish(record.id, null);
+        continue;
+      }
+
+      if (postExists && needsContentRepair) {
+        this.logger.info('Queueing published record for WordPress content repair', {
+          episodeId: record.id,
+          wordpressPostId: record.wordpress_post_id,
+        });
+        this.repository.prepareForRepublish(record.id, record.wordpress_post_id);
+      }
+    }
   }
 
   private async collectNewCandidates(needed: number): Promise<CandidateResource[]> {
@@ -151,12 +205,14 @@ export class PodcastPipeline {
       status: record.status,
       sourceItemId: record.source_item_id,
       type: record.type,
-    });
+      });
 
     try {
       if (!record.notebook_id) {
         this.progress.update(15, '创建 NotebookLM notebook');
-        const notebookId = await this.notebookLm.createNotebook(buildNotebookTitle(record));
+        const notebookId = await this.notebookLm.createNotebook(
+          buildNotebookTitle(this.config.wordpressSiteSlug, record),
+        );
         this.repository.updateNotebookId(record.id, notebookId);
         record = this.mustGetRecord(record.id);
       } else {
@@ -168,6 +224,8 @@ export class PodcastPipeline {
         || !record.podcast_title
         || !record.podcast_description
         || !record.podcast_tags
+        || normalizeNotebookText(record.podcast_description) !== record.podcast_description.trim()
+        || parsePodcastTags(record.podcast_tags).join(', ') !== record.podcast_tags.trim()
       ) {
         await this.ensureGeneratedAssets(record);
         record = this.mustGetRecord(record.id);
@@ -195,10 +253,14 @@ export class PodcastPipeline {
       throw new Error(`Episode ${record.id} is missing notebook_id`);
     }
 
-    let description = record.podcast_description?.trim() ?? '';
+    const storedDescription = record.podcast_description ?? '';
+    const storedTags = record.podcast_tags ?? '';
+    let description = normalizeNotebookText(storedDescription);
     let tags = parsePodcastTags(record.podcast_tags ?? '');
-    let artifactTitle = record.podcast_title ?? '';
+    let artifactTitle = record.podcast_title?.trim() ?? '';
     let audioPath = record.podcast_audio_file_path ?? '';
+    let shouldPersistNormalizedValues = description !== storedDescription.trim()
+      || tags.join(', ') !== storedTags.trim();
 
     if (!description || tags.length === 0) {
       this.progress.update(30, '搜索资料并导入 sources');
@@ -209,10 +271,11 @@ export class PodcastPipeline {
 
     if (!description) {
       this.progress.update(60, '生成播客简介');
-      description = (await this.notebookLm.queryText(
+      description = normalizeNotebookText(await this.notebookLm.queryText(
         record.notebook_id,
         `帮我生成播客的简介（纯文字，里面不能有超链接和引用，300字左右），语言用${this.config.cli.lang}`,
-      )).trim();
+      ));
+      shouldPersistNormalizedValues = true;
     }
 
     if (tags.length === 0) {
@@ -222,6 +285,7 @@ export class PodcastPipeline {
         `帮我生成播客的标签（标签之间用逗号分隔，最多6个），语言用${this.config.cli.lang}`,
       );
       tags = parsePodcastTags(tagsText);
+      shouldPersistNormalizedValues = true;
     }
 
     if (!audioPath || !fs.existsSync(audioPath) || !artifactTitle) {
@@ -238,30 +302,39 @@ export class PodcastPipeline {
       this.progress.update(92, '下载音频文件');
       await this.notebookLm.downloadAudio(record.notebook_id, artifact.id, audioPath);
       artifactTitle = this.notebookLm.buildPodcastTitle(record.name, { title: artifact.title || audioFilename });
+      shouldPersistNormalizedValues = true;
     }
 
-    this.repository.updateGenerated(record.id, {
-      audioPath,
-      format: record.podcast_format ?? this.config.cli.format,
-      title: artifactTitle || record.name,
-      description,
-      tags,
-    });
+    if (
+      shouldPersistNormalizedValues
+      || record.status !== 'generated'
+      || record.podcast_audio_file_path !== audioPath
+      || (record.podcast_title?.trim() ?? '') !== artifactTitle
+    ) {
+      this.repository.updateGenerated(record.id, {
+        audioPath,
+        format: record.podcast_format ?? this.config.cli.format,
+        title: artifactTitle || record.name,
+        description,
+        tags,
+      });
+    }
   }
 
   private async publishRecord(record: EpisodeRecord): Promise<void> {
-    if (record.wordpress_post_id) {
-      this.logger.info('Skipping publish because WordPress post already exists', {
-        episodeId: record.id,
-        wordpressPostId: record.wordpress_post_id,
-      });
-      return;
-    }
-
     const posterPath = await this.ensurePosterPath(record);
     const audioPath = record.podcast_audio_file_path;
     if (!audioPath) {
       throw new Error(`Episode ${record.id} is missing podcast_audio_file_path`);
+    }
+
+    const description = normalizeNotebookText(record.podcast_description ?? '');
+    const tagNames = parsePodcastTags(record.podcast_tags ?? '');
+    if (!description) {
+      throw new Error(`Episode ${record.id} is missing podcast_description`);
+    }
+    if (tagNames.length === 0) {
+      throw new Error(`Episode ${record.id} is missing podcast_tags`);
     }
 
     this.progress.update(95, '上传封面图片');
@@ -269,18 +342,36 @@ export class PodcastPipeline {
     this.progress.update(97, '上传播客音频');
     const audioId = await this.wordpress.uploadMedia(audioPath);
     this.progress.update(98, '同步 WordPress 标签');
-    const tagIds = await this.wordpress.ensureTags(parsePodcastTags(record.podcast_tags ?? ''));
-    this.progress.update(99, '创建 WordPress 文章');
-    const postId = await this.wordpress.createEpisodePost({
-      title: record.podcast_title ?? record.name,
-      content: record.podcast_description ?? '',
-      excerpt: record.podcast_description ?? '',
-      tagIds,
-      featuredMediaId: imageId,
-      audioMediaId: audioId,
-      imageMediaId: imageId,
-      status: this.config.cli.wpStatus,
-    });
+    const tagIds = await this.wordpress.ensureTags(tagNames);
+    const categoryId = await this.wordpress.ensureEpisodeCategory(record.type);
+    const existingPostId = record.wordpress_post_id;
+    const postExists = existingPostId
+      ? await this.wordpress.episodePostExists(existingPostId)
+      : false;
+    this.progress.update(99, postExists ? '更新 WordPress 文章' : '创建 WordPress 文章');
+    const postId = postExists
+      ? await this.wordpress.updateEpisodePost(existingPostId as number, {
+          title: record.podcast_title?.trim() || record.name,
+          content: description,
+          excerpt: description,
+          tagIds,
+          featuredMediaId: imageId,
+          audioMediaId: audioId,
+          imageMediaId: imageId,
+          categoryId,
+          status: this.config.cli.wpStatus,
+        })
+      : await this.wordpress.createEpisodePost({
+          title: record.podcast_title?.trim() || record.name,
+          content: description,
+          excerpt: description,
+          tagIds,
+          featuredMediaId: imageId,
+          audioMediaId: audioId,
+          imageMediaId: imageId,
+          categoryId,
+          status: this.config.cli.wpStatus,
+        });
     this.repository.markPublished(record.id, postId);
   }
 

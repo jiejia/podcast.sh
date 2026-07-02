@@ -16,6 +16,7 @@ export interface AppConfig {
   wordpressUsername: string;
   wordpressAppPassword: string;
   wordpressSiteUrl: string;
+  wordpressSiteSlug: string;
   tmdbApiToken: string;
   bangumiApiToken: string;
   resourceStartDate: string;
@@ -23,6 +24,8 @@ export interface AppConfig {
   dbPath: string;
   posterDir: string;
   audioDir: string;
+  logDir: string;
+  runLogPath: string;
   cli: CliOptions;
 }
 
