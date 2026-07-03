@@ -1,4 +1,6 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+
+dotenv.config({ override: true });
 
 import { loadConfig, parseCliArgs } from './config.js';
 import { createLogger } from './lib/logger.js';

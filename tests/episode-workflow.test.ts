@@ -11,9 +11,9 @@ function buildRecord(overrides: Partial<EpisodeRecord> = {}): EpisodeRecord {
   return {
     id: 1,
     source_item_id: '123',
-    type: 'anime',
+    type: 'tv',
     name: 'Test',
-    source_website_url: 'https://bangumi.tv/subject/123',
+    source_website_url: 'https://www.themoviedb.org/tv/123',
     notebook_id: 'notebook-1',
     wordpress_post_id: 99,
     wordpress_site_url: 'https://example.com',
@@ -22,7 +22,7 @@ function buildRecord(overrides: Partial<EpisodeRecord> = {}): EpisodeRecord {
     podcast_format: 'brief',
     podcast_title: '《Test》标题',
     podcast_description: '第一段\n\n第二段',
-    podcast_tags: '动漫, 新番',
+    podcast_tags: '剧集, 新作',
     podcast_lang: '中文',
     status: 'published',
     error_message: null,
@@ -36,11 +36,11 @@ describe('episode workflow helpers', () => {
   test('normalizes wrapped notebook output and tags', () => {
     const normalized = normalizeEpisodeRecordData(buildRecord({
       podcast_description: '{"answer":"第一段\\n\\n第二段"}',
-      podcast_tags: '{"answer":"动漫, 新番, 新番, 解析 [1-3]。"}',
+      podcast_tags: '{"answer":"剧集, 新作, 新作, 解析 [1-3]。"}',
     }));
 
     expect(normalized.description).toBe('第一段\n\n第二段');
-    expect(normalized.tagNames).toEqual(['动漫', '新番', '解析']);
+    expect(normalized.tagNames).toEqual(['剧集', '新作', '解析']);
     expect(normalized.hasStoredNormalizationDiff).toBe(true);
   });
 

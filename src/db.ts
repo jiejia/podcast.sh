@@ -214,7 +214,7 @@ export class EpisodeRepository {
       CREATE TABLE IF NOT EXISTS episode (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         source_item_id TEXT NOT NULL,
-        type TEXT NOT NULL CHECK(type IN ('movie', 'tv', 'anime')),
+        type TEXT NOT NULL CHECK(type IN ('movie', 'tv')),
         name TEXT NOT NULL,
         source_website_url TEXT NOT NULL,
         notebook_id TEXT,

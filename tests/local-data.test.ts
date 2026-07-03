@@ -21,10 +21,10 @@ describe('resetLocalData', () => {
 
     const paths = buildLocalDataPaths(dir);
     fs.mkdirSync(paths.dbDir, { recursive: true });
-    fs.mkdirSync(path.join(paths.posterDir, 'anime'), { recursive: true });
+    fs.mkdirSync(path.join(paths.posterDir, 'tv'), { recursive: true });
     fs.mkdirSync(path.join(paths.audioDir, '1'), { recursive: true });
     fs.writeFileSync(path.join(paths.dbDir, 'podcast.sqlite'), 'test');
-    fs.writeFileSync(path.join(paths.posterDir, 'anime', 'cover.jpg'), 'poster');
+    fs.writeFileSync(path.join(paths.posterDir, 'tv', 'cover.jpg'), 'poster');
     fs.writeFileSync(path.join(paths.audioDir, '1', 'audio.m4a'), 'audio');
 
     const result = await resetLocalData(paths);

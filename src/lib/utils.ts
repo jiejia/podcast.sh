@@ -2,12 +2,25 @@ import path from 'node:path';
 
 import type { EpisodeRecord, EpisodeType, PodcastFormat } from '../types.js';
 
-const LANGUAGE_MAP: Record<string, string> = {
+const NOTEBOOK_LANGUAGE_MAP: Record<string, string> = {
   '中文': 'zh-CN',
   '简体中文': 'zh-CN',
   '繁體中文': 'zh-TW',
+  '日本語': 'ja',
+  '日文': 'ja',
   '英文': 'en',
   'english': 'en',
+  'English': 'en',
+};
+
+const TMDB_LANGUAGE_MAP: Record<string, string> = {
+  '中文': 'zh-CN',
+  '简体中文': 'zh-CN',
+  '繁體中文': 'zh-TW',
+  'English': 'en-US',
+  '英文': 'en-US',
+  '日本語': 'ja-JP',
+  '日文': 'ja-JP',
 };
 
 export function nowIso(): string {
@@ -28,18 +41,73 @@ export function normalizeNotebookLanguage(lang: string): string {
     return 'zh-CN';
   }
 
-  const mapped = LANGUAGE_MAP[trimmed] ?? LANGUAGE_MAP[trimmed.toLowerCase()];
+  const mapped = NOTEBOOK_LANGUAGE_MAP[trimmed] ?? NOTEBOOK_LANGUAGE_MAP[trimmed.toLowerCase()];
   if (mapped) {
     return mapped;
+  }
+
+  const localeMatch = trimmed.match(/^([a-z]{2,3})(?:-[A-Z]{2})?$/);
+  if (localeMatch) {
+    const primary = localeMatch[1].toLowerCase();
+    if (trimmed === 'zh-CN' || trimmed === 'zh-SG') {
+      return 'zh-CN';
+    }
+    if (trimmed === 'zh-TW' || trimmed === 'zh-HK') {
+      return 'zh-TW';
+    }
+    return primary;
   }
 
   return trimmed;
 }
 
+export function resolvePromptLanguage(lang: string): string {
+  const trimmed = lang.trim();
+  if (!trimmed) {
+    return '简体中文';
+  }
+
+  if (trimmed === '中文' || trimmed === '简体中文' || trimmed === 'zh-CN' || trimmed === 'zh-SG') {
+    return '简体中文';
+  }
+  if (trimmed === '繁體中文' || trimmed === 'zh-TW' || trimmed === 'zh-HK') {
+    return '繁體中文';
+  }
+  if (trimmed === 'English' || trimmed === '英文') {
+    return 'English';
+  }
+  if (trimmed === '日本語' || trimmed === '日文') {
+    return '日本語';
+  }
+
+  const localeMatch = trimmed.match(/^([a-z]{2,3})(?:-[A-Z]{2})?$/);
+  if (localeMatch) {
+    const primary = localeMatch[1].toLowerCase();
+    const displayNames = typeof Intl.DisplayNames === 'function'
+      ? new Intl.DisplayNames(['en'], { type: 'language' })
+      : null;
+    return displayNames?.of(primary) ?? primary;
+  }
+
+  return trimmed;
+}
+
+export function resolveTmdbLanguage(lang: string): string {
+  const trimmed = lang.trim();
+  if (!trimmed) {
+    return 'zh-CN';
+  }
+
+  if (/^[a-z]{2}-[A-Z]{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  return TMDB_LANGUAGE_MAP[trimmed] ?? TMDB_LANGUAGE_MAP[trimmed.toLowerCase()] ?? 'en-US';
+}
+
+
 export function displayType(type: EpisodeType): string {
   switch (type) {
-    case 'anime':
-      return 'Anime';
     case 'tv':
       return 'TV';
     case 'movie':

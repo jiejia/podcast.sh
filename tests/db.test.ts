@@ -22,9 +22,9 @@ describe('EpisodeRepository', () => {
 
     repository.insertPending({
       sourceItemId: '123',
-      type: 'anime',
-      name: 'Test Anime',
-      sourceWebsiteUrl: 'https://bangumi.tv/subject/123',
+      type: 'tv',
+      name: 'Test TV',
+      sourceWebsiteUrl: 'https://www.themoviedb.org/tv/123',
       posterUrl: 'https://example.com/test.jpg',
       releaseDate: '2026-01-01',
     }, 'https://example.com', '/tmp/test.jpg', '中文');
@@ -32,9 +32,9 @@ describe('EpisodeRepository', () => {
     expect(() => {
       repository.insertPending({
         sourceItemId: '123',
-        type: 'anime',
-        name: 'Test Anime',
-        sourceWebsiteUrl: 'https://bangumi.tv/subject/123',
+        type: 'tv',
+        name: 'Test TV',
+        sourceWebsiteUrl: 'https://www.themoviedb.org/tv/123',
         posterUrl: 'https://example.com/test.jpg',
         releaseDate: '2026-01-01',
       }, 'https://example.com', '/tmp/test.jpg', '中文');

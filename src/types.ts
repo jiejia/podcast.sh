@@ -1,4 +1,4 @@
-export type EpisodeType = 'movie' | 'tv' | 'anime';
+export type EpisodeType = 'movie' | 'tv';
 export type EpisodeStatus = 'pending' | 'generated' | 'published' | 'failed';
 export type PodcastFormat = 'deep-dive' | 'brief' | 'critique' | 'debate';
 export type WordPressPostStatus = 'publish' | 'draft';
@@ -18,8 +18,8 @@ export interface AppConfig {
   wordpressSiteUrl: string;
   wordpressSiteSlug: string;
   tmdbApiToken: string;
-  bangumiApiToken: string;
   configuredTypes: EpisodeType[];
+  regions: string[];
   resourceStartDate: string;
   resourceStartScore: number;
   storageDir: string;
@@ -29,6 +29,16 @@ export interface AppConfig {
   logDir: string;
   runLogPath: string;
   cli: CliOptions;
+}
+
+export interface MaintenanceConfig {
+  wordpressUsername: string;
+  wordpressAppPassword: string;
+  wordpressSiteUrl: string;
+  storageDir: string;
+  dbPath: string;
+  logDir: string;
+  runLogPath: string;
 }
 
 export interface EpisodeRecord {

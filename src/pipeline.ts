@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { EpisodeRepository } from './db.js';
+import { findFreshCandidates } from './lib/candidate-selection.js';
 import {
   decidePublishedRecordRepair,
   normalizeEpisodeRecordData,
@@ -13,10 +14,10 @@ import {
   inferExtensionFromUrl,
   normalizeNotebookText,
   parsePodcastTags,
+  resolvePromptLanguage,
   sanitizeFilename,
 } from './lib/utils.js';
 import { downloadToFile } from './services/files.js';
-import { BangumiService } from './services/bangumi.js';
 import { NotebookLmService } from './services/notebooklm.js';
 import { TmdbService } from './services/tmdb.js';
 import { WordPressService } from './services/wordpress.js';
@@ -26,7 +27,6 @@ export class PodcastPipeline {
   private readonly repository: EpisodeRepository;
   private readonly notebookLm: NotebookLmService;
   private readonly tmdb: TmdbService;
-  private readonly bangumi: BangumiService;
   private readonly wordpress: WordPressService;
 
   public constructor(
@@ -37,7 +37,6 @@ export class PodcastPipeline {
     this.repository = new EpisodeRepository(config.dbPath);
     this.notebookLm = new NotebookLmService(logger);
     this.tmdb = new TmdbService(config.tmdbApiToken);
-    this.bangumi = new BangumiService(config.bangumiApiToken);
     this.wordpress = new WordPressService(
       config.wordpressSiteUrl,
       config.wordpressUsername,
@@ -156,15 +155,27 @@ export class PodcastPipeline {
   }
 
   private async fetchTypeCandidates(type: EpisodeType, limit: number): Promise<CandidateResource[]> {
-    const raw = type === 'anime'
-      ? await this.bangumi.fetchCandidates(this.config.resourceStartDate, this.config.resourceStartScore, limit)
-      : await this.tmdb.fetchCandidates(type, this.config.resourceStartDate, this.config.resourceStartScore, limit);
-
-    return raw.filter((candidate) => !this.repository.findByUniqueKey(
-      this.config.wordpressSiteUrl,
-      candidate.type,
-      candidate.sourceItemId,
-    ));
+    return await findFreshCandidates({
+      limit,
+      maxRequestLimit: Math.max(limit * 10, this.config.configuredTypes.length * limit * 4),
+      fetchCandidates: async (requestLimit) => {
+        return await this.tmdb.fetchCandidates(
+          type,
+          this.config.resourceStartDate,
+          this.config.resourceStartScore,
+          this.config.cli.lang,
+          this.config.regions,
+          requestLimit,
+        );
+      },
+      isExisting: (candidate) => {
+        return Boolean(this.repository.findByUniqueKey(
+          this.config.wordpressSiteUrl,
+          candidate.type,
+          candidate.sourceItemId,
+        ));
+      },
+    });
   }
 
   private async createPendingRecord(candidate: CandidateResource): Promise<EpisodeRecord> {
@@ -240,6 +251,7 @@ export class PodcastPipeline {
     let artifactTitle = normalized.title;
     let audioPath = normalized.audioPath;
     let shouldPersistNormalizedValues = normalized.hasStoredNormalizationDiff;
+    const promptLanguage = resolvePromptLanguage(this.config.cli.lang);
 
     if (!description || tags.length === 0) {
       this.progress.update(30, '搜索资料并导入 sources');
@@ -252,7 +264,7 @@ export class PodcastPipeline {
       this.progress.update(60, '生成播客简介');
       description = normalizeNotebookText(await this.notebookLm.queryText(
         record.notebook_id,
-        `帮我生成播客的简介（纯文字，里面不能有超链接和引用，300字左右），语言用${this.config.cli.lang}`,
+        `帮我生成播客的简介（纯文字，里面不能有超链接和引用，300字左右），语言用${promptLanguage}`,
       ));
       shouldPersistNormalizedValues = true;
     }
@@ -261,7 +273,7 @@ export class PodcastPipeline {
       this.progress.update(66, '生成播客标签');
       const tagsText = await this.notebookLm.queryText(
         record.notebook_id,
-        `帮我生成播客的标签（标签之间用逗号分隔，最多6个），语言用${this.config.cli.lang}`,
+        `帮我生成播客的标签（标签之间用逗号分隔，最多6个），语言用${promptLanguage}`,
       );
       tags = parsePodcastTags(tagsText);
       shouldPersistNormalizedValues = true;
@@ -367,10 +379,9 @@ export class PodcastPipeline {
       return current;
     }
 
-    const basePath = path.join(this.config.posterDir, record.type, record.source_item_id);
-    const downloaded = record.type === 'anime'
-      ? await this.bangumi.redownloadPoster(record.source_item_id, basePath)
-      : await this.tmdb.redownloadPoster(record.type, record.source_item_id, basePath);
+    const sanitizedSourceId = record.source_item_id.replace(/[^A-Za-z0-9._-]/g, '-');
+    const basePath = path.join(this.config.posterDir, record.type, sanitizedSourceId);
+    const downloaded = await this.tmdb.redownloadPoster(record.source_website_url, record.source_item_id, basePath);
 
     this.repository.updatePosterPath(record.id, downloaded);
     return downloaded;

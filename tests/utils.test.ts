@@ -8,6 +8,8 @@ import {
   normalizeNotebookText,
   normalizePodcastFormat,
   parsePodcastTags,
+  resolvePromptLanguage,
+  resolveTmdbLanguage,
 } from '../src/lib/utils.js';
 
 describe('utils', () => {
@@ -19,7 +21,29 @@ describe('utils', () => {
   test('normalizes language aliases', () => {
     expect(normalizeNotebookLanguage('中文')).toBe('zh-CN');
     expect(normalizeNotebookLanguage('English')).toBe('en');
+    expect(normalizeNotebookLanguage('日本語')).toBe('ja');
+    expect(normalizeNotebookLanguage('en-US')).toBe('en');
+    expect(normalizeNotebookLanguage('ja-JP')).toBe('ja');
+    expect(normalizeNotebookLanguage('fr-FR')).toBe('fr');
     expect(normalizeNotebookLanguage('es-419')).toBe('es-419');
+  });
+
+  test('maps lang to prompt language labels for NotebookLM text generation', () => {
+    expect(resolvePromptLanguage('zh-CN')).toBe('简体中文');
+    expect(resolvePromptLanguage('zh-TW')).toBe('繁體中文');
+    expect(resolvePromptLanguage('en-US')).toBe('English');
+    expect(resolvePromptLanguage('ja-JP')).toBe('Japanese');
+    expect(resolvePromptLanguage('fr-FR')).toBe('French');
+  });
+
+  test('maps TMDB language codes for supported CLI values', () => {
+    expect(resolveTmdbLanguage('中文')).toBe('zh-CN');
+    expect(resolveTmdbLanguage('繁體中文')).toBe('zh-TW');
+    expect(resolveTmdbLanguage('English')).toBe('en-US');
+    expect(resolveTmdbLanguage('日本語')).toBe('ja-JP');
+    expect(resolveTmdbLanguage('zh-CN')).toBe('zh-CN');
+    expect(resolveTmdbLanguage('en-US')).toBe('en-US');
+    expect(resolveTmdbLanguage('Portuguese')).toBe('en-US');
   });
 
   test('builds notebook title from local episode id', () => {

@@ -1,8 +1,10 @@
 import path from 'node:path';
 
 import { downloadToFile } from './files.js';
-import { inferExtensionFromUrl } from '../lib/utils.js';
+import { inferExtensionFromUrl, resolveTmdbLanguage } from '../lib/utils.js';
 import type { CandidateResource, EpisodeType } from '../types.js';
+
+type TmdbResourceType = 'movie' | 'tv';
 
 interface TmdbDiscoverResponse {
   results: Array<{
@@ -12,6 +14,7 @@ interface TmdbDiscoverResponse {
     poster_path: string | null;
     release_date?: string;
     first_air_date?: string;
+    origin_country?: string[];
     vote_average: number;
     vote_count: number;
   }>;
@@ -26,16 +29,38 @@ export class TmdbService {
   public constructor(private readonly apiToken: string) {}
 
   public async fetchCandidates(
-    type: Exclude<EpisodeType, 'anime'>,
+    type: EpisodeType,
     startDate: string,
     startScore: number,
+    lang: string,
+    regions: string[],
     limit: number,
   ): Promise<CandidateResource[]> {
-    return await this.scan(type, startDate, startScore, limit, 10);
+    const normalizedRegions = Array.from(new Set(regions.map((value) => value.trim().toUpperCase()).filter(Boolean)));
+    if (normalizedRegions.length <= 1) {
+      return await this.scan(
+        type,
+        startDate,
+        startScore,
+        lang,
+        limit,
+        10,
+        normalizedRegions[0],
+      );
+    }
+
+    const perRegionResults = await Promise.all(
+      normalizedRegions.map(async (region) => {
+        return await this.scan(type, startDate, startScore, lang, limit, 10, region);
+      }),
+    );
+
+    return this.mergeCandidates(perRegionResults.flat(), limit);
   }
 
-  public async redownloadPoster(type: Exclude<EpisodeType, 'anime'>, sourceItemId: string, targetPathBase: string): Promise<string> {
-    const detail = await this.request<TmdbDetailResponse>(`/${type}/${sourceItemId}`, new URLSearchParams({
+  public async redownloadPoster(sourceWebsiteUrl: string, sourceItemId: string, targetPathBase: string): Promise<string> {
+    const resourceType = this.resolveResourceTypeFromUrl(sourceWebsiteUrl);
+    const detail = await this.request<TmdbDetailResponse>(`/${resourceType}/${this.extractTmdbNumericId(sourceItemId)}`, new URLSearchParams({
       language: 'en-US',
     }));
 
@@ -50,19 +75,22 @@ export class TmdbService {
   }
 
   private async scan(
-    type: Exclude<EpisodeType, 'anime'>,
+    type: TmdbResourceType,
     startDate: string,
     startScore: number,
+    lang: string,
     limit: number,
     maxPages: number,
+    region?: string,
   ): Promise<CandidateResource[]> {
     const results: CandidateResource[] = [];
     const seen = new Set<string>();
+    const tmdbLanguage = resolveTmdbLanguage(lang);
 
     for (let page = 1; page <= maxPages && results.length < limit; page += 1) {
       const params = new URLSearchParams({
         include_adult: 'false',
-        language: 'en-US',
+        language: tmdbLanguage,
         page: String(page),
         sort_by: type === 'movie' ? 'primary_release_date.asc' : 'first_air_date.asc',
         'vote_average.gte': String(startScore),
@@ -70,6 +98,9 @@ export class TmdbService {
 
       if (type === 'movie') {
         params.set('primary_release_date.gte', startDate);
+        if (region) {
+          params.set('with_origin_country', region);
+        }
       } else {
         params.set('first_air_date.gte', startDate);
         params.set('include_null_first_air_dates', 'false');
@@ -82,13 +113,17 @@ export class TmdbService {
         if (!name || !releaseDate || !item.poster_path) {
           continue;
         }
-        if (seen.has(String(item.id))) {
+        if (type === 'tv' && region && !item.origin_country?.includes(region)) {
+          continue;
+        }
+        const sourceItemId = String(item.id);
+        if (seen.has(sourceItemId)) {
           continue;
         }
 
-        seen.add(String(item.id));
+        seen.add(sourceItemId);
         results.push({
-          sourceItemId: String(item.id),
+          sourceItemId,
           type,
           name,
           sourceWebsiteUrl: `https://www.themoviedb.org/${type}/${item.id}`,
@@ -103,6 +138,43 @@ export class TmdbService {
     }
 
     return results;
+  }
+
+  private mergeCandidates(candidates: CandidateResource[], limit: number): CandidateResource[] {
+    const deduped = new Map<string, CandidateResource>();
+    for (const candidate of candidates) {
+      const key = `${candidate.type}:${candidate.sourceItemId}`;
+      if (!deduped.has(key)) {
+        deduped.set(key, candidate);
+      }
+    }
+
+    return [...deduped.values()]
+      .sort((left, right) => left.releaseDate.localeCompare(right.releaseDate) || left.sourceItemId.localeCompare(right.sourceItemId))
+      .slice(0, limit);
+  }
+
+  private resolveResourceTypeFromUrl(sourceWebsiteUrl: string): TmdbResourceType {
+    try {
+      const pathname = new URL(sourceWebsiteUrl).pathname;
+      const match = pathname.match(/^\/(movie|tv)\//);
+      if (match) {
+        return match[1] as TmdbResourceType;
+      }
+    } catch {
+      // Fall through to error below.
+    }
+
+    throw new Error(`Unable to infer TMDB resource type from URL: ${sourceWebsiteUrl}`);
+  }
+
+  private extractTmdbNumericId(sourceItemId: string): string {
+    const match = sourceItemId.match(/(\d+)$/);
+    if (!match) {
+      throw new Error(`Unable to extract TMDB numeric id from source_item_id: ${sourceItemId}`);
+    }
+
+    return match[1];
   }
 
   private async request<T>(resourcePath: string, searchParams: URLSearchParams): Promise<T> {
