@@ -20,6 +20,7 @@ export interface AppConfig {
   tmdbApiToken: string;
   bangumiApiToken: string;
   resourceStartDate: string;
+  resourceStartScore: number;
   storageDir: string;
   dbPath: string;
   posterDir: string;

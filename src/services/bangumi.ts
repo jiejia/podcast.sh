@@ -36,14 +36,8 @@ interface BangumiSubjectResponse {
 export class BangumiService {
   public constructor(private readonly apiToken: string) {}
 
-  public async fetchCandidates(startDate: string, limit: number): Promise<CandidateResource[]> {
-    const strict = await this.scan(startDate, limit, true, 5);
-    if (strict.length >= limit) {
-      return strict.slice(0, limit);
-    }
-
-    const relaxed = await this.scan(startDate, limit, false, 10, strict);
-    return relaxed.slice(0, limit);
+  public async fetchCandidates(startDate: string, startScore: number, limit: number): Promise<CandidateResource[]> {
+    return await this.scan(startDate, startScore, limit, 50);
   }
 
   public async redownloadPoster(sourceItemId: string, targetPathBase: string): Promise<string> {
@@ -65,15 +59,14 @@ export class BangumiService {
 
   private async scan(
     startDate: string,
+    startScore: number,
     limit: number,
-    strict: boolean,
     maxPages: number,
-    seed: CandidateResource[] = [],
   ): Promise<CandidateResource[]> {
-    const results = [...seed];
-    const seen = new Set(results.map((item) => item.sourceItemId));
+    const matches: CandidateResource[] = [];
+    const seen = new Set<string>();
 
-    for (let page = 0; page < maxPages && results.length < limit; page += 1) {
+    for (let page = 0; page < maxPages; page += 1) {
       const url = new URL('https://api.bgm.tv/v0/subjects');
       url.searchParams.set('type', '2');
       url.searchParams.set('sort', 'date');
@@ -86,9 +79,19 @@ export class BangumiService {
       }
 
       const payload = await response.json() as BangumiBrowseResponse;
-      for (const item of payload.data ?? []) {
+      const pageItems = payload.data ?? [];
+      if (pageItems.length === 0) {
+        break;
+      }
+
+      let reachedOlderThanStartDate = false;
+      for (const item of pageItems) {
         const releaseDate = item.date ?? '';
-        if (!releaseDate || releaseDate < startDate) {
+        if (!releaseDate) {
+          continue;
+        }
+        if (releaseDate < startDate) {
+          reachedOlderThanStartDate = true;
           continue;
         }
 
@@ -103,13 +106,12 @@ export class BangumiService {
         }
 
         const score = item.rating?.score ?? 0;
-        const scoreCount = item.rating?.total ?? 0;
-        if (strict && (score < 6.5 || scoreCount < 100)) {
+        if (score < startScore) {
           continue;
         }
 
         seen.add(String(item.id));
-        results.push({
+        matches.push({
           sourceItemId: String(item.id),
           type: 'anime',
           name: item.name_cn?.trim() || item.name,
@@ -117,14 +119,16 @@ export class BangumiService {
           posterUrl,
           releaseDate,
         });
+      }
 
-        if (results.length >= limit) {
-          break;
-        }
+      if (reachedOlderThanStartDate) {
+        break;
       }
     }
 
-    return results;
+    return matches
+      .sort((left, right) => left.releaseDate.localeCompare(right.releaseDate) || left.sourceItemId.localeCompare(right.sourceItemId))
+      .slice(0, limit);
   }
 
   private async request<T>(resourcePath: string): Promise<T> {

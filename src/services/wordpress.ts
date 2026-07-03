@@ -20,6 +20,7 @@ interface WordPressPostResponse {
 interface WordPressEpisodeResponse {
   id: number;
   featured_media?: number;
+  audio_file?: string;
   meta?: Record<string, unknown>;
 }
 

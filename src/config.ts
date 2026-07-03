@@ -14,6 +14,7 @@ const envSchema = z.object({
   TMDB_API_TOKEN: z.string().min(1),
   BANGUMI_API_TOKEN: z.string().min(1),
   RESOURCE_START_DATE: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  RESOURCE_START_SCORE: z.coerce.number().min(0).max(10),
   STORAGE_DIR: z.string().min(1),
 });
 
@@ -82,6 +83,7 @@ export function loadConfig(cli: CliOptions): AppConfig {
     tmdbApiToken: env.TMDB_API_TOKEN,
     bangumiApiToken: env.BANGUMI_API_TOKEN,
     resourceStartDate: env.RESOURCE_START_DATE,
+    resourceStartScore: env.RESOURCE_START_SCORE,
     storageDir,
     dbPath: path.join(dbDir, 'podcast.sqlite'),
     posterDir,

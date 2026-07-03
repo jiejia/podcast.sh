@@ -25,14 +25,13 @@ interface TmdbDetailResponse {
 export class TmdbService {
   public constructor(private readonly apiToken: string) {}
 
-  public async fetchCandidates(type: Exclude<EpisodeType, 'anime'>, startDate: string, limit: number): Promise<CandidateResource[]> {
-    const strict = await this.scan(type, startDate, limit, true, 5);
-    if (strict.length >= limit) {
-      return strict.slice(0, limit);
-    }
-
-    const relaxed = await this.scan(type, startDate, limit, false, 10, strict);
-    return relaxed.slice(0, limit);
+  public async fetchCandidates(
+    type: Exclude<EpisodeType, 'anime'>,
+    startDate: string,
+    startScore: number,
+    limit: number,
+  ): Promise<CandidateResource[]> {
+    return await this.scan(type, startDate, startScore, limit, 10);
   }
 
   public async redownloadPoster(type: Exclude<EpisodeType, 'anime'>, sourceItemId: string, targetPathBase: string): Promise<string> {
@@ -53,20 +52,20 @@ export class TmdbService {
   private async scan(
     type: Exclude<EpisodeType, 'anime'>,
     startDate: string,
+    startScore: number,
     limit: number,
-    strict: boolean,
     maxPages: number,
-    seed: CandidateResource[] = [],
   ): Promise<CandidateResource[]> {
-    const results = [...seed];
-    const seen = new Set(results.map((item) => item.sourceItemId));
+    const results: CandidateResource[] = [];
+    const seen = new Set<string>();
 
     for (let page = 1; page <= maxPages && results.length < limit; page += 1) {
       const params = new URLSearchParams({
         include_adult: 'false',
         language: 'en-US',
         page: String(page),
-        sort_by: type === 'movie' ? 'primary_release_date.desc' : 'first_air_date.desc',
+        sort_by: type === 'movie' ? 'primary_release_date.asc' : 'first_air_date.asc',
+        'vote_average.gte': String(startScore),
       });
 
       if (type === 'movie') {
@@ -74,11 +73,6 @@ export class TmdbService {
       } else {
         params.set('first_air_date.gte', startDate);
         params.set('include_null_first_air_dates', 'false');
-      }
-
-      if (strict) {
-        params.set('vote_average.gte', '6.5');
-        params.set('vote_count.gte', '100');
       }
 
       const response = await this.request<TmdbDiscoverResponse>(`/discover/${type}`, params);

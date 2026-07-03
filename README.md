@@ -6,6 +6,7 @@ Automates resource discovery, NotebookLM podcast generation, and WordPress publi
 
 1. Copy `.env.example` to `.env` and fill in all required values.
    `WORDPRESS_SITE_SLUG` is used as the notebook title prefix, for example `localhost7007-000001`.
+   Resource selection starts at `RESOURCE_START_DATE` and only keeps items whose rating is at least `RESOURCE_START_SCORE`, then picks the oldest matching items first.
 2. Install dependencies:
 
 ```bash

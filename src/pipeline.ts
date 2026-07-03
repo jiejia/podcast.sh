@@ -3,6 +3,11 @@ import path from 'node:path';
 
 import { EpisodeRepository } from './db.js';
 import {
+  decidePublishedRecordRepair,
+  normalizeEpisodeRecordData,
+  shouldRefreshGeneratedAssets,
+} from './lib/episode-workflow.js';
+import {
   buildNotebookTitle,
   buildResearchQuery,
   inferExtensionFromUrl,
@@ -99,41 +104,24 @@ export class PodcastPipeline {
     );
 
     for (const record of publishedRecords) {
-      const normalizedDescription = normalizeNotebookText(record.podcast_description ?? '');
-      const normalizedTags = parsePodcastTags(record.podcast_tags ?? '');
-      const storedDescription = record.podcast_description?.trim() ?? '';
-      const storedTags = record.podcast_tags?.trim() ?? '';
-      const normalizedTagString = normalizedTags.join(', ');
-      const needsContentRepair = normalizedDescription !== storedDescription
-        || normalizedTagString !== storedTags;
+      const post = record.wordpress_post_id
+        ? await this.wordpress.getEpisodePost(record.wordpress_post_id)
+        : null;
+      const repairDecision = decidePublishedRecordRepair(record, {
+        audioFileUrl: post?.audio_file ?? null,
+        exists: post !== null,
+      });
 
-      const hasPublishPayload = Boolean(
-        record.podcast_audio_file_path
-        && record.podcast_title
-        && normalizedDescription
-        && normalizedTags.length > 0,
-      );
-
-      let postExists = false;
-      if (record.wordpress_post_id) {
-        postExists = await this.wordpress.episodePostExists(record.wordpress_post_id);
-      }
-
-      if (!postExists && hasPublishPayload) {
-        this.logger.info('Queueing published record for republish because WordPress post is missing', {
+      if (repairDecision.shouldRepair) {
+        this.logger.info('Queueing published record for WordPress repair', {
           episodeId: record.id,
+          reason: repairDecision.reason,
           wordpressPostId: record.wordpress_post_id,
         });
-        this.repository.prepareForRepublish(record.id, null);
-        continue;
-      }
-
-      if (postExists && needsContentRepair) {
-        this.logger.info('Queueing published record for WordPress content repair', {
-          episodeId: record.id,
-          wordpressPostId: record.wordpress_post_id,
-        });
-        this.repository.prepareForRepublish(record.id, record.wordpress_post_id);
+        this.repository.prepareForRepublish(
+          record.id,
+          repairDecision.resetWordPressPostId ? null : record.wordpress_post_id,
+        );
       }
     }
   }
@@ -169,8 +157,8 @@ export class PodcastPipeline {
 
   private async fetchTypeCandidates(type: EpisodeType, limit: number): Promise<CandidateResource[]> {
     const raw = type === 'anime'
-      ? await this.bangumi.fetchCandidates(this.config.resourceStartDate, limit)
-      : await this.tmdb.fetchCandidates(type, this.config.resourceStartDate, limit);
+      ? await this.bangumi.fetchCandidates(this.config.resourceStartDate, this.config.resourceStartScore, limit)
+      : await this.tmdb.fetchCandidates(type, this.config.resourceStartDate, this.config.resourceStartScore, limit);
 
     return raw.filter((candidate) => !this.repository.findByUniqueKey(
       this.config.wordpressSiteUrl,
@@ -219,14 +207,7 @@ export class PodcastPipeline {
         this.progress.update(20, '复用已有 notebook');
       }
 
-      if (
-        !record.podcast_audio_file_path
-        || !record.podcast_title
-        || !record.podcast_description
-        || !record.podcast_tags
-        || normalizeNotebookText(record.podcast_description) !== record.podcast_description.trim()
-        || parsePodcastTags(record.podcast_tags).join(', ') !== record.podcast_tags.trim()
-      ) {
+      if (shouldRefreshGeneratedAssets(record)) {
         await this.ensureGeneratedAssets(record);
         record = this.mustGetRecord(record.id);
       } else {
@@ -253,14 +234,12 @@ export class PodcastPipeline {
       throw new Error(`Episode ${record.id} is missing notebook_id`);
     }
 
-    const storedDescription = record.podcast_description ?? '';
-    const storedTags = record.podcast_tags ?? '';
-    let description = normalizeNotebookText(storedDescription);
-    let tags = parsePodcastTags(record.podcast_tags ?? '');
-    let artifactTitle = record.podcast_title?.trim() ?? '';
-    let audioPath = record.podcast_audio_file_path ?? '';
-    let shouldPersistNormalizedValues = description !== storedDescription.trim()
-      || tags.join(', ') !== storedTags.trim();
+    const normalized = normalizeEpisodeRecordData(record);
+    let description = normalized.description;
+    let tags = normalized.tagNames;
+    let artifactTitle = normalized.title;
+    let audioPath = normalized.audioPath;
+    let shouldPersistNormalizedValues = normalized.hasStoredNormalizationDiff;
 
     if (!description || tags.length === 0) {
       this.progress.update(30, '搜索资料并导入 sources');
@@ -323,17 +302,16 @@ export class PodcastPipeline {
 
   private async publishRecord(record: EpisodeRecord): Promise<void> {
     const posterPath = await this.ensurePosterPath(record);
-    const audioPath = record.podcast_audio_file_path;
+    const normalized = normalizeEpisodeRecordData(record);
+    const audioPath = normalized.audioPath;
     if (!audioPath) {
       throw new Error(`Episode ${record.id} is missing podcast_audio_file_path`);
     }
 
-    const description = normalizeNotebookText(record.podcast_description ?? '');
-    const tagNames = parsePodcastTags(record.podcast_tags ?? '');
-    if (!description) {
+    if (!normalized.description) {
       throw new Error(`Episode ${record.id} is missing podcast_description`);
     }
-    if (tagNames.length === 0) {
+    if (normalized.tagNames.length === 0) {
       throw new Error(`Episode ${record.id} is missing podcast_tags`);
     }
 
@@ -342,18 +320,19 @@ export class PodcastPipeline {
     this.progress.update(97, '上传播客音频');
     const audioId = await this.wordpress.uploadMedia(audioPath);
     this.progress.update(98, '同步 WordPress 标签');
-    const tagIds = await this.wordpress.ensureTags(tagNames);
+    const tagIds = await this.wordpress.ensureTags(normalized.tagNames);
     const categoryId = await this.wordpress.ensureEpisodeCategory(record.type);
     const existingPostId = record.wordpress_post_id;
-    const postExists = existingPostId
-      ? await this.wordpress.episodePostExists(existingPostId)
-      : false;
+    const existingPost = existingPostId
+      ? await this.wordpress.getEpisodePost(existingPostId)
+      : null;
+    const postExists = existingPost !== null;
     this.progress.update(99, postExists ? '更新 WordPress 文章' : '创建 WordPress 文章');
     const postId = postExists
       ? await this.wordpress.updateEpisodePost(existingPostId as number, {
-          title: record.podcast_title?.trim() || record.name,
-          content: description,
-          excerpt: description,
+          title: normalized.title || record.name,
+          content: normalized.description,
+          excerpt: normalized.description,
           tagIds,
           featuredMediaId: imageId,
           audioMediaId: audioId,
@@ -362,9 +341,9 @@ export class PodcastPipeline {
           status: this.config.cli.wpStatus,
         })
       : await this.wordpress.createEpisodePost({
-          title: record.podcast_title?.trim() || record.name,
-          content: description,
-          excerpt: description,
+          title: normalized.title || record.name,
+          content: normalized.description,
+          excerpt: normalized.description,
           tagIds,
           featuredMediaId: imageId,
           audioMediaId: audioId,
@@ -372,6 +351,13 @@ export class PodcastPipeline {
           categoryId,
           status: this.config.cli.wpStatus,
         });
+    const savedPost = await this.wordpress.getEpisodePost(postId);
+    if (!savedPost?.audio_file?.trim()) {
+      this.repository.prepareForRepublish(record.id, postId);
+      throw new Error(
+        'WordPress post saved, but Audio File is still empty. The target a-ripple-song site likely needs custom-fields support enabled for the episode post type.',
+      );
+    }
     this.repository.markPublished(record.id, postId);
   }
 

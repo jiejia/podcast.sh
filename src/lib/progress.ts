@@ -1,3 +1,5 @@
+import ora, { type Ora } from 'ora';
+
 import type { ProgressReporter } from '../types.js';
 
 function truncate(value: string, maxLength: number): string {
@@ -12,6 +14,17 @@ function truncate(value: string, maxLength: number): string {
   return `${value.slice(0, maxLength - 1)}…`;
 }
 
+function renderBar(percent: number): string {
+  const width = Math.max(10, Math.min(24, Math.floor((process.stdout.columns ?? 100) * 0.2)));
+  const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+  const filled = Math.round((clamped / 100) * width);
+  return `[${'='.repeat(filled)}${'-'.repeat(width - filled)}] ${String(clamped).padStart(3, ' ')}%`;
+}
+
+function buildLine(prefix: string, percent: number, status: string): string {
+  return `${prefix} ${renderBar(percent)} ${truncate(status, 80)}`;
+}
+
 export function createProgressReporter(enabled: boolean): ProgressReporter {
   if (!enabled) {
     return {
@@ -23,96 +36,52 @@ export function createProgressReporter(enabled: boolean): ProgressReporter {
     };
   }
 
-  const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let prefix = '';
-  let active = false;
-  let lastPercent = 0;
-  let lastStatus = '';
-  let spinnerIndex = 0;
-  let timer: NodeJS.Timeout | null = null;
+  let spinner: Ora | null = null;
 
-  function draw(percent: number, status: string, persist: boolean): void {
-    const width = Math.max(10, Math.min(24, Math.floor((process.stdout.columns ?? 100) * 0.2)));
-    const clamped = Math.max(0, Math.min(100, Math.round(percent)));
-    const filled = Math.round((clamped / 100) * width);
-    const spinner = spinnerFrames[spinnerIndex % spinnerFrames.length];
-    let bar = `${'='.repeat(filled)}${'-'.repeat(width - filled)}`;
-
-    if (!persist) {
-      const remaining = Math.max(0, width - filled);
-      const animatedTail = remaining > 0
-        ? spinner.repeat(remaining)
-        : '';
-      bar = `${'='.repeat(filled)}${animatedTail}`;
+  function ensureSpinner(text: string): Ora {
+    if (spinner) {
+      spinner.text = text;
+      return spinner;
     }
 
-    const line = `${prefix} [${bar}] ${String(clamped).padStart(3, ' ')}% ${truncate(status, 80)}`;
-
-    process.stdout.write(`\r\x1b[2K${line}`);
-
-    if (persist) {
-      process.stdout.write('\n');
-    }
+    spinner = ora({
+      hideCursor: true,
+      text,
+    }).start();
+    return spinner;
   }
 
-  function stopTimer(): void {
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
-    }
-  }
-
-  function ensureTimer(): void {
-    if (timer || !active) {
+  function clearSpinner(): void {
+    if (!spinner) {
       return;
     }
 
-    timer = setInterval(() => {
-      if (!active) {
-        stopTimer();
-        return;
-      }
-
-      spinnerIndex = (spinnerIndex + 1) % spinnerFrames.length;
-      draw(lastPercent, lastStatus, false);
-    }, 120);
-    timer.unref?.();
-  }
-
-  function render(percent: number, status: string, persist: boolean): void {
-    lastPercent = percent;
-    lastStatus = status;
-    active = !persist;
-    draw(percent, status, persist);
-
-    if (persist) {
-      stopTimer();
-    } else {
-      ensureTimer();
-    }
+    spinner.stop();
+    spinner = null;
   }
 
   return {
     note(message) {
-      if (active) {
-        stopTimer();
-        process.stdout.write('\n');
-        active = false;
-      }
+      clearSpinner();
       process.stdout.write(`${message}\n`);
     },
     beginItem(index, total, label) {
       prefix = `[${index}/${total}] ${truncate(label, 48)}`;
-      render(0, '准备中', false);
+      ensureSpinner(buildLine(prefix, 0, '准备中'));
     },
     update(percent, status) {
-      render(percent, status, false);
+      ensureSpinner(buildLine(prefix, percent, status));
     },
     complete(status) {
-      render(100, status, true);
+      const instance = ensureSpinner(buildLine(prefix, 100, status));
+      instance.succeed(buildLine(prefix, 100, status));
+      spinner = null;
     },
     fail(message) {
-      render(100, `FAILED ${message}`, true);
+      const instance = ensureSpinner(buildLine(prefix, 100, `FAILED ${message}`));
+      instance.fail(buildLine(prefix, 100, `FAILED ${message}`));
+      spinner = null;
     },
   };
 }
