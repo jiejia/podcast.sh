@@ -13,6 +13,18 @@ interface StudioArtifact {
   created_at?: string;
 }
 
+interface NotebookDetails {
+  notebook_id: string;
+  title?: string;
+  source_count?: number;
+  sources?: Array<{
+    id?: string;
+    title?: string;
+    url?: string | null;
+    type?: string;
+  }>;
+}
+
 interface WaitForAudioArtifactOptions {
   timeoutMs?: number;
   intervalMs?: number;
@@ -41,7 +53,18 @@ export class NotebookLmService {
   }
 
   public async runResearch(notebookId: string, query: string): Promise<void> {
-    await this.run(['research', 'start', query, '--notebook-id', notebookId, '--mode', 'fast', '--auto-import']);
+    await this.run(['research', 'start', query, '--notebook-id', notebookId, '--mode', 'fast']);
+    await this.run(['research', 'status', notebookId, '--full', '--poll-interval', '15', '--max-wait', '300']);
+    await this.run(['research', 'import', notebookId, '--timeout', '300']);
+  }
+
+  public async getNotebookSourceCount(notebookId: string): Promise<number> {
+    const output = await this.runJson(['notebook', 'get', notebookId]);
+    return this.extractSourceCount(output);
+  }
+
+  public async addSourceUrl(notebookId: string, url: string): Promise<void> {
+    await this.run(['source', 'add', notebookId, '--url', url, '--wait', '--wait-timeout', '300']);
   }
 
   public async createAudio(notebookId: string, format: PodcastFormat, language: string): Promise<void> {
@@ -147,6 +170,30 @@ export class NotebookLmService {
     return this.findStringField(output, 'id');
   }
 
+  private extractSourceCount(output: unknown): number {
+    if (typeof output === 'object' && output) {
+      const notebook = output as NotebookDetails;
+      if (typeof notebook.source_count === 'number') {
+        return notebook.source_count;
+      }
+      if (Array.isArray(notebook.sources)) {
+        return notebook.sources.length;
+      }
+    }
+
+    const sourceCount = this.findNumberField(output, 'source_count');
+    if (typeof sourceCount === 'number') {
+      return sourceCount;
+    }
+
+    const sources = this.findArrayField(output, 'sources');
+    if (Array.isArray(sources)) {
+      return sources.length;
+    }
+
+    return 0;
+  }
+
   private extractArtifacts(output: unknown): StudioArtifact[] {
     const matches: StudioArtifact[] = [];
     this.walk(output, (value) => {
@@ -218,6 +265,40 @@ export class NotebookLmService {
         const candidate = entry as Record<string, unknown>;
         if (typeof candidate[fieldName] === 'string') {
           found = candidate[fieldName] as string;
+        }
+      }
+    });
+    return found;
+  }
+
+  private findNumberField(value: unknown, fieldName: string): number | undefined {
+    let found: number | undefined;
+    this.walk(value, (entry) => {
+      if (typeof found === 'number') {
+        return;
+      }
+
+      if (entry && typeof entry === 'object') {
+        const candidate = entry as Record<string, unknown>;
+        if (typeof candidate[fieldName] === 'number') {
+          found = candidate[fieldName] as number;
+        }
+      }
+    });
+    return found;
+  }
+
+  private findArrayField(value: unknown, fieldName: string): unknown[] | undefined {
+    let found: unknown[] | undefined;
+    this.walk(value, (entry) => {
+      if (found) {
+        return;
+      }
+
+      if (entry && typeof entry === 'object') {
+        const candidate = entry as Record<string, unknown>;
+        if (Array.isArray(candidate[fieldName])) {
+          found = candidate[fieldName] as unknown[];
         }
       }
     });

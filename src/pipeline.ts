@@ -252,10 +252,22 @@ export class PodcastPipeline {
     let audioPath = normalized.audioPath;
     let shouldPersistNormalizedValues = normalized.hasStoredNormalizationDiff;
     const promptLanguage = resolvePromptLanguage(this.config.cli.lang);
-
-    if (!description || tags.length === 0) {
+    const sourceCount = await this.notebookLm.getNotebookSourceCount(record.notebook_id);
+    if (sourceCount === 0) {
       this.progress.update(30, '搜索资料并导入 sources');
       await this.notebookLm.runResearch(record.notebook_id, buildResearchQuery(record.type, record.name));
+      const importedSourceCount = await this.notebookLm.getNotebookSourceCount(record.notebook_id);
+      if (importedSourceCount === 0) {
+        this.progress.update(40, '补充资源页 source');
+        await this.notebookLm.addSourceUrl(record.notebook_id, record.source_website_url);
+      }
+      const verifiedSourceCount = await this.notebookLm.getNotebookSourceCount(record.notebook_id);
+      if (verifiedSourceCount === 0) {
+        throw new Error(`Notebook ${record.notebook_id} still has no sources after research/import`);
+      }
+    }
+
+    if (!description || tags.length === 0) {
       this.progress.update(50, '请求生成播客音频');
       await this.notebookLm.createAudio(record.notebook_id, this.config.cli.format, this.config.cli.lang);
     }
@@ -264,7 +276,7 @@ export class PodcastPipeline {
       this.progress.update(60, '生成播客简介');
       description = normalizeNotebookText(await this.notebookLm.queryText(
         record.notebook_id,
-        `帮我生成播客的简介（纯文字，里面不能有超链接和引用，300字左右），语言用${promptLanguage}`,
+        `帮我生成播客的简介（纯文字，里面不能有超链接和引用，300字左右），语言用${promptLanguage}(只返回简介，不要其他任何多余的语言)`,
       ));
       shouldPersistNormalizedValues = true;
     }
@@ -273,7 +285,7 @@ export class PodcastPipeline {
       this.progress.update(66, '生成播客标签');
       const tagsText = await this.notebookLm.queryText(
         record.notebook_id,
-        `帮我生成播客的标签（标签之间用逗号分隔，最多6个），语言用${promptLanguage}`,
+        `帮我生成播客的标签（标签之间用逗号分隔，最多6个），语言用${promptLanguage}(只返回标签，不要其他任何多余的语言)`,
       );
       tags = parsePodcastTags(tagsText);
       shouldPersistNormalizedValues = true;

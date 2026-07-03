@@ -204,6 +204,9 @@ export function normalizeNotebookText(raw: string): string {
 
 export function parsePodcastTags(raw: string): string[] {
   const normalized = extractNotebookAnswer(raw)
+    .replace(/^标签[:：]\s*/giu, '')
+    .replace(/^以下是[^,，。\n]*标签[:：]?\s*/giu, '')
+    .replace(/^只返回标签[,，。:\s]*/giu, '')
     .replaceAll('，', ',')
     .replaceAll('、', ',')
     .replace(/[；;]+/g, ',')
