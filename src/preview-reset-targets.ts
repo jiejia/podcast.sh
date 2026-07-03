@@ -1,11 +1,13 @@
 import 'dotenv/config';
 
 import type { CliOptions } from './types.js';
-import { loadConfig } from './config.js';
+import { getConfiguredTypesFromEnv, loadConfig } from './config.js';
 import { EpisodeRepository } from './db.js';
 
+const configuredTypes = getConfiguredTypesFromEnv(process.env);
+
 const previewCli: CliOptions = {
-  types: ['anime', 'tv', 'movie'],
+  types: configuredTypes,
   limit: 1,
   lang: '中文',
   format: 'brief',

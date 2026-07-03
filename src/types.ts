@@ -19,6 +19,7 @@ export interface AppConfig {
   wordpressSiteSlug: string;
   tmdbApiToken: string;
   bangumiApiToken: string;
+  configuredTypes: EpisodeType[];
   resourceStartDate: string;
   resourceStartScore: number;
   storageDir: string;

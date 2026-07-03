@@ -1,15 +1,17 @@
 import 'dotenv/config';
 
 import type { CliOptions } from './types.js';
-import { loadConfig } from './config.js';
+import { getConfiguredTypesFromEnv, loadConfig } from './config.js';
 import { EpisodeRepository } from './db.js';
 import { createLogger } from './lib/logger.js';
 import { buildLocalDataPaths, resetLocalData } from './lib/local-data.js';
 import { NotebookLmService } from './services/notebooklm.js';
 import { WordPressService } from './services/wordpress.js';
 
+const configuredTypes = getConfiguredTypesFromEnv(process.env);
+
 const resetCli: CliOptions = {
-  types: ['anime', 'tv', 'movie'],
+  types: configuredTypes,
   limit: 1,
   lang: '中文',
   format: 'brief',
