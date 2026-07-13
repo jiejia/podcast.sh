@@ -13,6 +13,8 @@ const envSchema = z.object({
   WORDPRESS_APP_PASSWORD: z.string().min(1),
   WORDPRESS_SITE_URL: z.string().url(),
   WORDPRESS_SITE_SLUG: z.string().min(1).regex(/^[A-Za-z0-9_-]+$/),
+  WORDPRESS_AUTHORS: z.string().default(''),
+  WORDPRESS_CONTRIBUTORS: z.string().default(''),
   TMDB_API_TOKEN: z.string().min(1),
   PODCAST_LANG: z.string().min(1),
   TYPES: z.string().min(1),
@@ -117,6 +119,8 @@ export function loadConfig(cli: CliOptions): AppConfig {
     wordpressAppPassword: env.WORDPRESS_APP_PASSWORD,
     wordpressSiteUrl: env.WORDPRESS_SITE_URL.replace(/\/+$/, ''),
     wordpressSiteSlug: env.WORDPRESS_SITE_SLUG,
+    wordpressAuthors: parseWordPressUsernames(env.WORDPRESS_AUTHORS),
+    wordpressContributors: parseWordPressUsernames(env.WORDPRESS_CONTRIBUTORS),
     tmdbApiToken: env.TMDB_API_TOKEN,
     configuredTypes,
     regions,
@@ -159,6 +163,15 @@ export function getConfiguredTypesFromEnv(env: NodeJS.ProcessEnv): EpisodeType[]
 export function getDefaultLangFromEnv(env: NodeJS.ProcessEnv): string {
   const parsed = envSchema.pick({ PODCAST_LANG: true }).parse(env);
   return parsed.PODCAST_LANG.trim();
+}
+
+export function parseWordPressUsernames(input: string): string[] {
+  return Array.from(new Set(
+    input
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+  ));
 }
 
 function parseConfiguredTypes(input: string): EpisodeType[] {

@@ -351,6 +351,12 @@ export class PodcastPipeline {
       ? await this.wordpress.getEpisodePost(existingPostId)
       : null;
     const postExists = existingPost !== null;
+    const [defaultMembers, defaultGuests] = postExists
+      ? [undefined, undefined]
+      : await Promise.all([
+          this.wordpress.resolveUserIds(this.config.wordpressAuthors, 'author'),
+          this.wordpress.resolveUserIds(this.config.wordpressContributors, 'contributor'),
+        ]);
     this.progress.update(99, postExists ? '更新 WordPress 文章' : '创建 WordPress 文章');
     const postId = postExists
       ? await this.wordpress.updateEpisodePost(existingPostId as number, {
@@ -374,6 +380,8 @@ export class PodcastPipeline {
           imageMediaId: imageId,
           categoryId,
           status: this.config.cli.wpStatus,
+          members: defaultMembers,
+          guests: defaultGuests,
         });
     const savedPost = await this.wordpress.getEpisodePost(postId);
     if (!savedPost?.audio_file?.trim()) {

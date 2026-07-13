@@ -7,6 +7,7 @@ Automates resource discovery, NotebookLM podcast generation, and WordPress publi
 1. Copy `.env.example` to `.env` and fill in all required values.
    `WORDPRESS_SITE_SLUG` is used as the notebook title prefix, for example `localhost7007-000001`.
    `PODCAST_LANG` sets the default podcast language when `--lang` is omitted.
+   `WORDPRESS_AUTHORS` and `WORDPRESS_CONTRIBUTORS` set the default Members and Guests for new podcast episodes; use comma-separated WordPress usernames for multiple users.
    `TYPES` is required and controls the allowed resource types for `--type`. `--type` cannot be omitted unless `--limit` is also omitted; in that special case the CLI uses the full configured `TYPES` list and sets the total limit to one item per type.
    Resource selection starts at `RESOURCE_START_DATE` and only keeps items whose rating is at least `RESOURCE_START_SCORE`, then picks the oldest matching items first.
 2. Install dependencies:

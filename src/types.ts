@@ -17,6 +17,8 @@ export interface AppConfig {
   wordpressAppPassword: string;
   wordpressSiteUrl: string;
   wordpressSiteSlug: string;
+  wordpressAuthors: string[];
+  wordpressContributors: string[];
   tmdbApiToken: string;
   configuredTypes: EpisodeType[];
   regions: string[];

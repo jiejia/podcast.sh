@@ -17,6 +17,28 @@ interface WordPressPostResponse {
   id: number;
 }
 
+interface WordPressUserResponse {
+  id: number;
+  username: string;
+  roles?: string[];
+}
+
+type WordPressUserRole = 'author' | 'contributor';
+
+interface EpisodePostInput {
+  title: string;
+  content: string;
+  excerpt: string;
+  tagIds: number[];
+  featuredMediaId: number;
+  audioMediaId: number;
+  imageMediaId: number;
+  categoryId: number;
+  status: WordPressPostStatus;
+  members?: number[];
+  guests?: number[];
+}
+
 interface WordPressEpisodeResponse {
   id: number;
   featured_media?: number;
@@ -29,10 +51,13 @@ const EPISODE_AUDIO_META_KEY = '_aripplesong_episode_audio_file';
 const EPISODE_IMAGE_META_KEY = '_aripplesong_episode_episode_image';
 const EPISODE_EXPLICIT_META_KEY = '_aripplesong_episode_episode_explicit';
 const EPISODE_TYPE_META_KEY = '_aripplesong_episode_episode_type';
+const EPISODE_MEMBERS_META_KEY = '_aripplesong_episode_members';
+const EPISODE_GUESTS_META_KEY = '_aripplesong_episode_guests';
 
 export class WordPressService {
   private readonly authHeader: string;
   private readonly restBaseUrl: string;
+  private readonly userIdCache = new Map<string, number>();
 
   public constructor(
     private readonly siteUrl: string,
@@ -70,6 +95,41 @@ export class WordPressService {
     return ids;
   }
 
+  public async resolveUserIds(usernames: string[], role: WordPressUserRole): Promise<number[]> {
+    const userIds: number[] = [];
+    for (const username of usernames) {
+      const normalizedUsername = username.trim();
+      const cacheKey = `${role}:${normalizedUsername.toLowerCase()}`;
+      const cached = this.userIdCache.get(cacheKey);
+      if (cached !== undefined) {
+        userIds.push(cached);
+        continue;
+      }
+
+      const response = await this.request(
+        `/wp-json/wp/v2/users?search=${encodeURIComponent(normalizedUsername)}&roles=${role}&per_page=100&context=edit`,
+        { method: 'GET' },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to search WordPress ${role} users (${response.status}): ${await response.text()}`);
+      }
+
+      const users = await this.parseJsonResponse<WordPressUserResponse[]>(response, `WordPress ${role} user search`);
+      const exactUser = users.find((user) => {
+        return user.username.trim().toLowerCase() === normalizedUsername.toLowerCase()
+          && (user.roles ?? []).includes(role);
+      });
+      if (!exactUser) {
+        throw new Error(`WordPress user "${normalizedUsername}" was not found with role "${role}"`);
+      }
+
+      this.userIdCache.set(cacheKey, exactUser.id);
+      userIds.push(exactUser.id);
+    }
+
+    return userIds;
+  }
+
   public async uploadMedia(filePath: string): Promise<number> {
     const filename = path.basename(filePath);
     const headerFilename = sanitizeHeaderFilename(filename, `upload${path.extname(filename) || ''}`);
@@ -91,31 +151,11 @@ export class WordPressService {
     return payload.id;
   }
 
-  public async createEpisodePost(input: {
-    title: string;
-    content: string;
-    excerpt: string;
-    tagIds: number[];
-    featuredMediaId: number;
-    audioMediaId: number;
-    imageMediaId: number;
-    categoryId: number;
-    status: WordPressPostStatus;
-  }): Promise<number> {
+  public async createEpisodePost(input: EpisodePostInput): Promise<number> {
     return await this.saveEpisodePost(null, input);
   }
 
-  public async updateEpisodePost(postId: number, input: {
-    title: string;
-    content: string;
-    excerpt: string;
-    tagIds: number[];
-    featuredMediaId: number;
-    audioMediaId: number;
-    imageMediaId: number;
-    categoryId: number;
-    status: WordPressPostStatus;
-  }): Promise<number> {
+  public async updateEpisodePost(postId: number, input: EpisodePostInput): Promise<number> {
     return await this.saveEpisodePost(postId, input);
   }
 
@@ -132,20 +172,23 @@ export class WordPressService {
     return true;
   }
 
-  private async saveEpisodePost(postId: number | null, input: {
-    title: string;
-    content: string;
-    excerpt: string;
-    tagIds: number[];
-    featuredMediaId: number;
-    audioMediaId: number;
-    imageMediaId: number;
-    categoryId: number;
-    status: WordPressPostStatus;
-  }): Promise<number> {
+  private async saveEpisodePost(postId: number | null, input: EpisodePostInput): Promise<number> {
     const resourcePath = postId === null
       ? '/wp-json/wp/v2/aripplesong_episode'
       : `/wp-json/wp/v2/aripplesong_episode/${postId}`;
+    const meta: Record<string, unknown> = {
+      [EPISODE_AUDIO_META_KEY]: input.audioMediaId,
+      [EPISODE_IMAGE_META_KEY]: input.imageMediaId,
+      [EPISODE_EXPLICIT_META_KEY]: 'clean',
+      [EPISODE_TYPE_META_KEY]: 'full',
+    };
+    if (input.members !== undefined) {
+      meta[EPISODE_MEMBERS_META_KEY] = input.members;
+    }
+    if (input.guests !== undefined) {
+      meta[EPISODE_GUESTS_META_KEY] = input.guests;
+    }
+
     const response = await this.request(resourcePath, {
       method: 'POST',
       headers: {
@@ -159,12 +202,7 @@ export class WordPressService {
         tags: input.tagIds,
         featured_media: input.featuredMediaId,
         [EPISODE_TAXONOMY]: [input.categoryId],
-        meta: {
-          [EPISODE_AUDIO_META_KEY]: input.audioMediaId,
-          [EPISODE_IMAGE_META_KEY]: input.imageMediaId,
-          [EPISODE_EXPLICIT_META_KEY]: 'clean',
-          [EPISODE_TYPE_META_KEY]: 'full',
-        },
+        meta,
       }),
     });
     if (!response.ok) {
