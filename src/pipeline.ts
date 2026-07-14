@@ -8,6 +8,7 @@ import {
   normalizeEpisodeRecordData,
   shouldRefreshGeneratedAssets,
 } from './lib/episode-workflow.js';
+import { removeLocalFile } from './lib/local-data.js';
 import {
   buildNotebookTitle,
   buildResearchQuery,
@@ -121,7 +122,10 @@ export class PodcastPipeline {
           record.id,
           repairDecision.resetWordPressPostId ? null : record.wordpress_post_id,
         );
+        continue;
       }
+
+      await this.cleanupPublishedRecord(record);
     }
   }
 
@@ -391,6 +395,72 @@ export class PodcastPipeline {
       );
     }
     this.repository.markPublished(record.id, postId);
+    await this.cleanupPublishedRecord({
+      ...record,
+      podcast_feature_image_file_path: posterPath,
+      podcast_audio_file_path: audioPath,
+    });
+  }
+
+  private async cleanupPublishedRecord(record: EpisodeRecord): Promise<void> {
+    const cleanupErrors: string[] = [];
+
+    if (record.notebook_id) {
+      this.progress.update(99, '删除 NotebookLM notebook');
+      try {
+        await this.notebookLm.deleteNotebook(record.notebook_id);
+        this.repository.clearNotebookId(record.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        cleanupErrors.push(`NotebookLM notebook: ${message}`);
+        this.logger.error('Published episode NotebookLM cleanup failed', {
+          episodeId: record.id,
+          notebookId: record.notebook_id,
+          error: message,
+        });
+      }
+    }
+
+    const localFiles: Array<{
+      label: string;
+      path: string | null;
+      clearPath: () => void;
+    }> = [
+      {
+        label: '封面文件',
+        path: record.podcast_feature_image_file_path,
+        clearPath: () => this.repository.clearPosterPath(record.id),
+      },
+      {
+        label: '音频文件',
+        path: record.podcast_audio_file_path,
+        clearPath: () => this.repository.clearAudioPath(record.id),
+      },
+    ];
+
+    for (const file of localFiles) {
+      if (!file.path) {
+        continue;
+      }
+
+      this.progress.update(99, `删除本地${file.label}`);
+      try {
+        await removeLocalFile(file.path);
+        file.clearPath();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        cleanupErrors.push(`${file.label}: ${message}`);
+        this.logger.error('Published episode local file cleanup failed', {
+          episodeId: record.id,
+          filePath: file.path,
+          error: message,
+        });
+      }
+    }
+
+    if (cleanupErrors.length > 0) {
+      this.progress.note(`播客已发布，但部分清理失败；下次运行会重试：${cleanupErrors.join('; ')}`);
+    }
   }
 
   private async ensurePosterPath(record: EpisodeRecord): Promise<string> {

@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, test } from 'vitest';
 
-import { buildLocalDataPaths, resetLocalData } from '../src/lib/local-data.js';
+import { buildLocalDataPaths, removeLocalFile, resetLocalData } from '../src/lib/local-data.js';
 
 const cleanupPaths: string[] = [];
 
@@ -15,6 +15,18 @@ afterEach(() => {
 });
 
 describe('resetLocalData', () => {
+  test('removes a local episode file and tolerates an already missing file', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast-sh-file-'));
+    cleanupPaths.push(dir);
+    const filePath = path.join(dir, 'episode.m4a');
+    fs.writeFileSync(filePath, 'audio');
+
+    await removeLocalFile(filePath);
+    await removeLocalFile(filePath);
+
+    expect(fs.existsSync(filePath)).toBe(false);
+  });
+
   test('removes local db, poster, and audio data then recreates empty folders', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast-sh-reset-'));
     cleanupPaths.push(dir);

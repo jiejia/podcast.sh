@@ -23,6 +23,10 @@ export function buildLocalDataPaths(storageDir: string): LocalDataPaths {
   };
 }
 
+export async function removeLocalFile(filePath: string): Promise<void> {
+  await fs.rm(filePath, { force: true });
+}
+
 export async function resetLocalData(paths: LocalDataPaths): Promise<ResetLocalDataResult> {
   const removedPaths: string[] = [];
   const recreatedPaths: string[] = [];

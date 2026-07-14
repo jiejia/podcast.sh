@@ -74,3 +74,4 @@ This command removes the script-linked WordPress episode posts/media, removes th
 - The script stores SQLite data under `${STORAGE_DIR}/db/podcast.sqlite`.
 - Downloaded posters and audio files are stored under `${STORAGE_DIR}/posters` and `${STORAGE_DIR}/audio`.
 - Each run also writes a JSONL log file under `${STORAGE_DIR}/logs`.
+- After a podcast is confirmed published, the pipeline deletes its NotebookLM notebook and local poster/audio files. If cleanup fails, the published record remains intact and cleanup is retried on the next run.

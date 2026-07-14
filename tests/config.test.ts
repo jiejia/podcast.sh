@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, test } from 'vitest';
 
-import { getConfiguredTypesFromEnv, getDefaultLangFromEnv, loadConfig, loadMaintenanceConfig, parseCliArgs } from '../src/config.js';
+import {
+  getConfiguredTypesFromEnv,
+  getDefaultLangFromEnv,
+  loadConfig,
+  loadMaintenanceConfig,
+  parseCliArgs,
+  parseWordPressUsernames,
+} from '../src/config.js';
 
 const originalEnv = { ...process.env };
 
@@ -80,6 +87,8 @@ describe('parseCliArgs', () => {
       WORDPRESS_APP_PASSWORD: 'app-password',
       WORDPRESS_SITE_URL: 'http://localhost:7007',
       WORDPRESS_SITE_SLUG: 'localhost7007',
+      WORDPRESS_AUTHORS: 'notebooklm, host, notebooklm',
+      WORDPRESS_CONTRIBUTORS: 'guest-a, guest-b',
       TMDB_API_TOKEN: 'tmdb-token',
       PODCAST_LANG: 'zh-CN',
       TYPES: 'tv,movie',
@@ -101,6 +110,8 @@ describe('parseCliArgs', () => {
     expect(config.resourceStartScore).toBe(7.8);
     expect(config.configuredTypes).toEqual(['tv', 'movie']);
     expect(config.regions).toEqual(['US', 'JP']);
+    expect(config.wordpressAuthors).toEqual(['notebooklm', 'host']);
+    expect(config.wordpressContributors).toEqual(['guest-a', 'guest-b']);
   });
 
   test('parses TYPES from env and rejects empty values', () => {
@@ -166,5 +177,10 @@ describe('parseCliArgs', () => {
       ...originalEnv,
       PODCAST_LANG: 'en-US',
     })).toBe('en-US');
+  });
+
+  test('parses comma-separated WordPress usernames', () => {
+    expect(parseWordPressUsernames(' author-a, author-b, author-a ,, ')).toEqual(['author-a', 'author-b']);
+    expect(parseWordPressUsernames('')).toEqual([]);
   });
 });

@@ -80,4 +80,38 @@ describe('EpisodeRepository', () => {
 
     repository.close();
   });
+
+  test('clears published notebook and local asset references after cleanup', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'podcast-sh-db-cleanup-'));
+    cleanupPaths.push(dir);
+    const repository = new EpisodeRepository(path.join(dir, 'podcast.sqlite'));
+    const record = repository.insertPending({
+      sourceItemId: 'cleanup-1',
+      type: 'tv',
+      name: 'Cleanup test',
+      sourceWebsiteUrl: 'https://www.themoviedb.org/tv/cleanup-1',
+      posterUrl: 'https://example.com/cleanup.jpg',
+      releaseDate: '2026-01-01',
+    }, 'https://example.com', '/tmp/cleanup.jpg', '中文');
+
+    repository.updateNotebookId(record.id, 'notebook-1');
+    repository.updateGenerated(record.id, {
+      audioPath: '/tmp/cleanup.m4a',
+      format: 'deep-dive',
+      title: 'Cleanup test',
+      description: 'Description',
+      tags: ['cleanup'],
+    });
+    repository.markPublished(record.id, 100);
+    repository.clearNotebookId(record.id);
+    repository.clearPosterPath(record.id);
+    repository.clearAudioPath(record.id);
+
+    const cleaned = repository.findById(record.id);
+    expect(cleaned?.status).toBe('published');
+    expect(cleaned?.notebook_id).toBeNull();
+    expect(cleaned?.podcast_feature_image_file_path).toBeNull();
+    expect(cleaned?.podcast_audio_file_path).toBeNull();
+    repository.close();
+  });
 });

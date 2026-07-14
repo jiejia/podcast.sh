@@ -188,6 +188,30 @@ export class EpisodeRepository {
     `).run(wordpressPostId, nowIso(), id);
   }
 
+  public clearNotebookId(id: number): void {
+    this.db.prepare(`
+      UPDATE episode
+      SET notebook_id = NULL, updated_at = ?
+      WHERE id = ?
+    `).run(nowIso(), id);
+  }
+
+  public clearPosterPath(id: number): void {
+    this.db.prepare(`
+      UPDATE episode
+      SET podcast_feature_image_file_path = NULL, updated_at = ?
+      WHERE id = ?
+    `).run(nowIso(), id);
+  }
+
+  public clearAudioPath(id: number): void {
+    this.db.prepare(`
+      UPDATE episode
+      SET podcast_audio_file_path = NULL, updated_at = ?
+      WHERE id = ?
+    `).run(nowIso(), id);
+  }
+
   public prepareForRepublish(id: number, wordpressPostId: number | null): void {
     this.db.prepare(`
       UPDATE episode
