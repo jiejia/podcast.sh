@@ -35,8 +35,21 @@ interface WaitForAudioArtifactOptions {
   }) => void;
 }
 
+interface NotebookLmServiceOptions {
+  executor?: (command: string, args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const AUDIO_CREATE_RETRY_DELAYS_MS = [30_000, 60_000, 120_000] as const;
+
 export class NotebookLmService {
-  public constructor(private readonly logger: Logger) {}
+  private readonly executor: (command: string, args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
+  private readonly sleepFn: (ms: number) => Promise<void>;
+
+  public constructor(private readonly logger: Logger, options: NotebookLmServiceOptions = {}) {
+    this.executor = options.executor ?? ((command, args) => this.exec(command, args));
+    this.sleepFn = options.sleep ?? sleep;
+  }
 
   public async checkLogin(): Promise<void> {
     await this.run(['login', '--check']);
@@ -68,7 +81,7 @@ export class NotebookLmService {
   }
 
   public async createAudio(notebookId: string, format: PodcastFormat, language: string): Promise<void> {
-    await this.run([
+    const args = [
       'audio',
       'create',
       notebookId,
@@ -77,7 +90,28 @@ export class NotebookLmService {
       '--language',
       normalizeNotebookLanguage(language),
       '--confirm',
-    ]);
+    ];
+
+    for (let attempt = 1; attempt <= AUDIO_CREATE_RETRY_DELAYS_MS.length + 1; attempt += 1) {
+      try {
+        await this.run(args);
+        return;
+      } catch (error) {
+        const delayMs = AUDIO_CREATE_RETRY_DELAYS_MS[attempt - 1];
+        if (delayMs === undefined || !this.isRateLimitError(error)) {
+          throw error;
+        }
+
+        this.logger.info('NotebookLM audio generation rate limited; retrying', {
+          notebookId,
+          attempt,
+          nextAttempt: attempt + 1,
+          delayMs,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        await this.sleepFn(delayMs);
+      }
+    }
   }
 
   public async queryText(notebookId: string, prompt: string): Promise<string> {
@@ -132,12 +166,17 @@ export class NotebookLmService {
 
   private async run(args: string[]): Promise<string> {
     this.logger.info('Running nlm command', { args });
-    const result = await this.exec('nlm', args);
+    const result = await this.executor('nlm', args);
     if (result.code !== 0) {
       throw new Error(`nlm ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
     }
 
     return result.stdout;
+  }
+
+  private isRateLimitError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /resource_exhausted|rate[ -]?limit|too many requests|\b429\b/i.test(message);
   }
 
   private async runJson(args: string[]): Promise<unknown> {
